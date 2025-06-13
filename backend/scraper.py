@@ -38,9 +38,9 @@ async def ensure_login(
     except PlayTimeout:
         pass
     # ✅ Check if login is needed
-    if not await page.is_visible('[name="username"]'):
-        print("✅ Already logged in.")
-        return
+    # if not await page.is_visible('[name="username"]'):
+    #     print("✅ Already logged in.")
+    #     return
 
     # 🔐 Login if necessary
     print("🔑 Logging in…")
