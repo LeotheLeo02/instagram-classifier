@@ -2,7 +2,6 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 import os
 from scraper import scrape_followers
-
 from playwright.async_api import async_playwright
 
 async def lifespan(app: FastAPI):
