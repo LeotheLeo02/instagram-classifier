@@ -33,29 +33,24 @@ async def ensure_login(
 ) -> None:
     state_path = Path(f"{login_user}_state.json")
 
-    # 1️⃣ probe with the same page
     try:
         await page.goto("https://www.instagram.com/", timeout=probe_timeout)
     except PlayTimeout:
         pass
 
-    # if "/accounts/login" not in page.url:
-    #     return  # already logged in
+    # ✅ Check if login is needed
+    if not await page.is_visible('[name="username"]'):
+        print("✅ Already logged in.")
+        return
 
-    # 2️⃣ perform login on the same page
+    # 🔐 Login if necessary
     print("🔑 Logging in…")
     await page.goto("https://www.instagram.com/accounts/login/")
     await page.fill('[name="username"]', login_user)
     await page.fill('[name="password"]', login_pass)
     await page.click('button[type="submit"]')
-    try:
-        await page.wait_for_selector('text=/Not now/i', timeout=8_000)
-        await page.click('text=/Not now/i')
-    except PlayTimeout:
-        pass
 
-    # 3️⃣ save cookies into context’s storage
-    #    but we still need the context, so grab it back:
+    # 💾 Save cookies to file
     await page.context.storage_state(path=state_path)
 
 # ---------- main scrape helper -----------------------------------
