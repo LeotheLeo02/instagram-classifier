@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 import os
 from scraper import scrape_followers
+
 from playwright.async_api import async_playwright
 
 async def lifespan(app: FastAPI):
@@ -25,6 +26,8 @@ class Req(BaseModel):
 
 @app.post("/classify")
 async def classify(req: Req):
+    print("🔍 Received request:", req.dict())
+    print("✅ Starting scrape with:", os.getenv("IG_USER"))
     bios = await scrape_followers(
         browser=app.state.browser,
         login_user=os.getenv("IG_USER"),
