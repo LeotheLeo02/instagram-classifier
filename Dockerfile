@@ -1,18 +1,18 @@
-# Use a Playwright-ready image from Microsoft
-FROM mcr.microsoft.com/playwright/python:v1.44.0-jammy
+# Dockerfile (at project root)
 
-# Set working directory inside the container
+FROM python:3.9-slim
+
+# 1) where we live
 WORKDIR /app
 
-# Install Python dependencies
-COPY requirements.txt .
+# 2) install dependencies
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy your entire backend code into the container
-COPY . .
+# 3) copy your code
+COPY backend/ backend/
 
-# Default environment settings
-ENV PYTHONUNBUFFERED=1
-
-# Command to run your FastAPI app
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+# 4) tell uvicorn to import backend.app:app
+ENV PORT 8000
+EXPOSE 8000
+CMD ["uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "8000"]
