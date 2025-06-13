@@ -37,8 +37,6 @@ async def ensure_login(
         await page.goto("https://www.instagram.com/", timeout=probe_timeout)
     except PlayTimeout:
         pass
-
-    print("Current URL:", page.url)
     # ✅ Check if login is needed
     if not await page.is_visible('[name="username"]'):
         print("✅ Already logged in.")
@@ -79,7 +77,12 @@ async def scrape_followers(
 
     # -- open the target followers overlay --
     await page.goto(f"https://www.instagram.com/{target}/")
-    print("Current URL:", page.url)
+    await page.screenshot(
+        path=f"shots/{target}_profile.png",
+        full_page=True,  # ⬅️ stitches the whole page, not only the viewport
+    )
+    print(f"📸  Saved screenshot → shots/{target}_profile.png")
+
     await page.click('a[href$="/followers/"]')
     await page.wait_for_selector('div[role="dialog"]', timeout=15_000)
     dialog = page.locator('div[role="dialog"]').last
