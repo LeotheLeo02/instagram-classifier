@@ -39,8 +39,8 @@ async def ensure_login(
     except PlayTimeout:
         pass
 
-    if "/accounts/login" not in page.url:
-        return  # already logged in
+    # if "/accounts/login" not in page.url:
+    #     return  # already logged in
 
     # 2️⃣ perform login on the same page
     print("🔑 Logging in…")
