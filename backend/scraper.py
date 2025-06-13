@@ -71,54 +71,67 @@ async def scrape_followers(
         storage_state=state_path if state_path.exists() else None,
         viewport={"width": 1280, "height": 800},
         user_agent="Mozilla/5.0 (X11; Linux x86_64)",
+        record_video_dir="videos",
     )
     page = await context.new_page()
-    await ensure_login(page, login_user, login_pass)
+    try:
+        await ensure_login(page, login_user, login_pass)
 
-    # -- open the target followers overlay --
-    await page.goto(f"https://www.instagram.com/{target}/")
-    await page.screenshot(
-        path=f"shots/{target}_profile.png",
-        full_page=True,  # ⬅️ stitches the whole page, not only the viewport
-    )
-    print(f"📸  Saved screenshot → shots/{target}_profile.png")
+        # -- open the target followers overlay --
+        await page.goto(f"https://www.instagram.com/{target}/")
+        await page.screenshot(
+            path=f"shots/{target}_profile.png",
+            full_page=True,  # ⬅️ stitches the whole page, not only the viewport
+        )
+        print(f"📸  Saved screenshot → shots/{target}_profile.png")
+        video_path = await page.video.path()
+        print(f"🎥 Saved video to {video_path}")
+        await page.click('a[href$="/followers/"]')
+        await page.wait_for_selector('div[role="dialog"]', timeout=15_000)
+        dialog = page.locator('div[role="dialog"]').last
+        first_link = dialog.locator('a[href^="/"]').first
+        await first_link.wait_for(state="attached", timeout=15_000)
 
-    await page.click('a[href$="/followers/"]')
-    await page.wait_for_selector('div[role="dialog"]', timeout=15_000)
-    dialog = page.locator('div[role="dialog"]').last
-    first_link = dialog.locator('a[href^="/"]').first
-    await first_link.wait_for(state="attached", timeout=15_000)
+        user_links = dialog.locator('a[href^="/"]')
+        scroll_box = await dialog.evaluate_handle(
+            "d => [...d.querySelectorAll('div')].find(x => ['auto','scroll'].includes(getComputedStyle(x).overflowY)) || d"
+        )
 
-    user_links = dialog.locator('a[href^="/"]')
-    scroll_box = await dialog.evaluate_handle(
-        "d => [...d.querySelectorAll('div')].find(x => ['auto','scroll'].includes(getComputedStyle(x).overflowY)) || d"
-    )
+        followers = set()
+        start = time.time()
 
-    followers = set()
-    start = time.time()
+        while (time.time() - start) < scroll_seconds and len(followers) < max_followers:
+            for t in await user_links.all_inner_texts():
+                if t.strip():
+                    followers.add(t.strip())
+            if len(followers) >= max_followers:
+                break
+            # scroll
+            count_links = await user_links.count()
+            if count_links:
+                await user_links.nth(count_links - 1).scroll_into_view_if_needed()
+            await asyncio.sleep(1)
 
-    while (time.time() - start) < scroll_seconds and len(followers) < max_followers:
-        for t in await user_links.all_inner_texts():
-            if t.strip():
-                followers.add(t.strip())
-        if len(followers) >= max_followers:
-            break
-        # scroll
-        count_links = await user_links.count()
-        if count_links:
-            await user_links.nth(count_links - 1).scroll_into_view_if_needed()
-        await asyncio.sleep(1)
+        print(f"Collected {len(followers)} handles; now fetching bios…")
 
-    print(f"Collected {len(followers)} handles; now fetching bios…")
-
-    results = []
-    for handle in sorted(followers)[:max_followers]:
-        try:
-            bio = await get_bio(page, handle)
-        except Exception as e:
-            print("bio error", handle, e)
-            bio = ""
-        results.append({"username": handle, "bio": bio})
-
-    await context.close()
+        results = []
+        for handle in sorted(followers)[:max_followers]:
+            try:
+                bio = await get_bio(page, handle)
+            except Exception as e:
+                print("bio error", handle, e)
+                bio = ""
+            results.append({"username": handle, "bio": bio})
+        # exception handler for screenshot on error
+    except Exception as e:
+        # Capture the page state on failure
+        await page.screenshot(path=f"shots/error_{target}.png", full_page=True)
+        print(f"❌ Error during scrape: {e}. Screenshot saved to shots/error_{target}.png")
+        raise
+    finally:
+        # Always close the context so the video is flushed to disk
+        await context.close()
+        if page.video:
+            video_path = await page.video.path()
+            print(f"🎥 Saved video to {video_path}")
     return results

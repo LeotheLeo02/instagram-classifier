@@ -3,7 +3,7 @@ from pydantic import BaseModel
 import os
 from scraper import scrape_followers
 from playwright.async_api import async_playwright
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from pathlib import Path
 
 async def lifespan(app: FastAPI):
@@ -48,3 +48,10 @@ async def debug_shot(filename: str = "last.png"):
         shot_path.open("rb"),
         media_type="image/png"
     )
+
+@app.get("/debug/video")
+async def debug_video(filename: str):
+    path = Path("videos") / filename
+    if not path.exists():
+        return {"error": f"{filename} not found"}
+    return FileResponse(path, media_type="video/webm")
