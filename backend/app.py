@@ -3,6 +3,8 @@ from pydantic import BaseModel
 import os
 from scraper import scrape_followers
 from playwright.async_api import async_playwright
+from fastapi.responses import StreamingResponse
+from pathlib import Path
 
 async def lifespan(app: FastAPI):
     # 1) start Playwright once
@@ -35,3 +37,14 @@ async def classify(req: Req):
         max_followers=req.max_followers,
     )
     return {"results": bios}
+
+
+@app.get("/debug/screenshot")
+async def debug_shot(filename: str = "last.png"):
+    shot_path = Path("shots") / filename
+    if not shot_path.exists():
+        return {"error": "file not found"}
+    return StreamingResponse(
+        shot_path.open("rb"),
+        media_type="image/png"
+    )
