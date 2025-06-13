@@ -44,7 +44,6 @@ async def ensure_login(
 
     # 🔐 Login if necessary
     print("🔑 Logging in…")
-    await page.goto("https://www.instagram.com/accounts/login/")
     await page.fill('[name="username"]', login_user)
     await page.fill('[name="password"]', login_pass)
     await page.click('button[type="submit"]')
