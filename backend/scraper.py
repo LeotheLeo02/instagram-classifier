@@ -6,13 +6,14 @@ Reusable Playwright helper for:
 3.  pulling bios for each follower
 """
 
-import asyncio, time, json
+import asyncio, time, random
 from pathlib import Path
 from typing import List, Dict
-import re
-from playwright.async_api import Browser, BrowserContext, TimeoutError as PlayTimeout
+from playwright.async_api import Browser, TimeoutError as PlayTimeout
+import httpx
 
-# ---------- simple BIO extractor ---------------------------------
+
+
 async def get_bio(page, username: str) -> str:
     """Return the profile bio (may be empty)."""
     await page.goto(f"https://www.instagram.com/{username}/", timeout=30_000)
@@ -31,27 +32,25 @@ async def ensure_login(
     login_pass: str,
     probe_timeout: int = 8_000,
 ) -> None:
-    state_path = Path(f"{login_user}_state.json")
+    """Open instagram.com and authenticate if necessary."""
+    await page.goto("https://www.instagram.com/", timeout=probe_timeout)
 
-    try:
-        await page.goto("https://www.instagram.com/", timeout=probe_timeout)
-    except PlayTimeout:
-        pass
-    # ✅ Check if login is needed
-    # if not await page.is_visible('[name="username"]'):
-    #     print("✅ Already logged in.")
-    #     return
+    # Already logged in?
+    if not await page.is_visible('input[name="username"]'):
+        print("✅ Already logged in.")
+        return
 
-    # 🔐 Login if necessary
+    # --- Log in ---
     print("🔑 Logging in…")
-    await page.fill('[name="username"]', login_user)
-    await page.fill('[name="password"]', login_pass)
-    await page.click('button[type="submit"]')
+    await page.fill('input[name="username"]', login_user)
+    await page.fill('input[name="password"]', login_pass)
 
-    # 💾 Save cookies to file
-    await page.context.storage_state(path=state_path)
+    async with page.expect_navigation():
+        await page.click('button[type="submit"]')
 
-# ---------- main scrape helper -----------------------------------
+    print("🎉 Login complete.")
+
+
 async def scrape_followers(
     browser: Browser,
     login_user: str,
@@ -69,8 +68,7 @@ async def scrape_followers(
     context = await browser.new_context(
         storage_state=state_path if state_path.exists() else None,
         viewport={"width": 1280, "height": 800},
-        user_agent="Mozilla/5.0 (X11; Linux x86_64)",
-        record_video_dir="videos",
+        user_agent="Mozilla/5.0 (X11; Linux x86_64)"
     )
     page = await context.new_page()
     try:
@@ -80,11 +78,9 @@ async def scrape_followers(
         await page.goto(f"https://www.instagram.com/{target}/")
         await page.screenshot(
             path=f"shots/{target}_profile.png",
-            full_page=True,  # ⬅️ stitches the whole page, not only the viewport
+            full_page=True,
         )
         print(f"📸  Saved screenshot → shots/{target}_profile.png")
-        video_path = await page.video.path()
-        print(f"🎥 Saved video to {video_path}")
         await page.click('a[href$="/followers/"]')
         await page.wait_for_selector('div[role="dialog"]', timeout=15_000)
         dialog = page.locator('div[role="dialog"]').last
@@ -92,9 +88,6 @@ async def scrape_followers(
         await first_link.wait_for(state="attached", timeout=15_000)
 
         user_links = dialog.locator('a[href^="/"]')
-        scroll_box = await dialog.evaluate_handle(
-            "d => [...d.querySelectorAll('div')].find(x => ['auto','scroll'].includes(getComputedStyle(x).overflowY)) || d"
-        )
 
         followers = set()
         start = time.time()
@@ -113,15 +106,40 @@ async def scrape_followers(
 
         print(f"Collected {len(followers)} handles; now fetching bios…")
 
-        results = []
+        bios = []
         for handle in sorted(followers)[:max_followers]:
             try:
                 bio = await get_bio(page, handle)
             except Exception as e:
                 print("bio error", handle, e)
                 bio = ""
-            results.append({"username": handle, "bio": bio})
-        # exception handler for screenshot on error
+            bios.append({"username": handle, "bio": bio})
+
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            bio_texts = [b["bio"] for b in bios]
+
+            try:
+                print("Bio texts:", bio_texts)
+                r = await client.post(
+                "https://bio-classifier.onrender.com/classify",
+                json={"bios": bio_texts},
+                )
+                r.raise_for_status()
+                print("Response:", r.json())
+                flags = r.json()["results"]
+            except httpx.HTTPError as e:
+                print("❗️Remote classify failed:", e)
+                # optional fallback to local classify_profiles
+                flags = [ str(i) for i, bio in enumerate(bio_texts) if bio ]
+
+        yes_usernames = [bios[int(idx)]["username"] for idx in flags]
+        yes_rows = [
+        {
+            "username": u,
+            "url": f"https://www.instagram.com/{u}/",
+        }
+            for u in yes_usernames
+        ]
     except Exception as e:
         # Capture the page state on failure
         await page.screenshot(path=f"shots/error_{target}.png", full_page=True)
@@ -130,7 +148,4 @@ async def scrape_followers(
     finally:
         # Always close the context so the video is flushed to disk
         await context.close()
-        if page.video:
-            video_path = await page.video.path()
-            print(f"🎥 Saved video to {video_path}")
-    return results
+    return yes_rows

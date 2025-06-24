@@ -1,57 +1,50 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import os
-from scraper import scrape_followers
 from playwright.async_api import async_playwright
-from fastapi.responses import StreamingResponse, FileResponse
-from pathlib import Path
+from .scraper import scrape_followers
 
 async def lifespan(app: FastAPI):
-    # 1) start Playwright once
     pw = await async_playwright().start()
-    # 2) launch a single browser instance (headless in prod)
-    browser = await pw.chromium.launch(headless=True)   # True on server
-    # 3) stash them so routes can reuse
+    browser = await pw.chromium.launch(headless=False)
     app.state.playwright = pw
     app.state.browser = browser
-    yield                                   # --- app runs here ---
-    # 4) graceful shutdown
+    yield
     await browser.close()
     await pw.stop()
 
 app = FastAPI(lifespan=lifespan)
 
-class Req(BaseModel):
-    target: str
-    max_followers: int
+# allow the Vite dev-server (5173) to call this API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-@app.post("/classify")
-async def classify(req: Req):
-    print("🔍 Received request:", req.dict())
-    print("✅ Starting scrape with:", os.getenv("IG_USER"))
-    bios = await scrape_followers(
+class ClassifyRequest(BaseModel):
+    login_user: str
+    login_pass: str
+    target: str
+    max_followers: int = 50
+
+class YesRow(BaseModel):
+    username: str
+    url: str
+
+class ClassifyResponse(BaseModel):
+    count: int
+    results: list[YesRow]
+
+@app.post("/classify", response_model=ClassifyResponse)
+async def classify(req: ClassifyRequest):
+    yes_usernames = await scrape_followers(
         browser=app.state.browser,
-        login_user=os.getenv("IG_USER"),
-        login_pass=os.getenv("IG_PASS"),
+        login_user=req.login_user,
+        login_pass=req.login_pass,
         target=req.target,
         max_followers=req.max_followers,
     )
-    return {"results": bios}
-
-
-@app.get("/debug/screenshot")
-async def debug_shot(filename: str = "last.png"):
-    shot_path = Path("shots") / filename
-    if not shot_path.exists():
-        return {"error": "file not found"}
-    return StreamingResponse(
-        shot_path.open("rb"),
-        media_type="image/png"
-    )
-
-@app.get("/debug/video")
-async def debug_video(filename: str):
-    path = Path("videos") / filename
-    if not path.exists():
-        return {"error": f"{filename} not found"}
-    return FileResponse(path, media_type="video/webm")
+    return {"count": len(yes_usernames), "results": yes_usernames}
